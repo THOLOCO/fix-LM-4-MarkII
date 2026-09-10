@@ -1,0 +1,45 @@
+================================================================
+  解壳后的内存镜像 —— 如何生成
+  Unpacked memory image — how to generate it
+================================================================
+
+【为什么不在仓库里】
+
+  unpacked_image.bin 是原 DLL 解壳后的完整内存镜像（2.75 MB），
+  本质上仍是该程序的可执行代码，因此不纳入仓库。
+
+  它只被 04_分析脚本/补丁工具/单元测试_*.py 使用。
+
+【怎么生成】
+
+  1) 准备原版 LM4-MarkII.dll（MD5 29b5a2eaff617264fa589164ed23d4a0）
+
+  2) 安装依赖
+         pip install unicorn capstone
+
+  3) 进入模拟器目录并运行
+         cd "04_分析脚本/模拟器"
+         python3 emu7.py
+
+     脚本会载入 LM4-MarkII.dll，模拟 NeoLite 壳的解压过程，
+     停在原始入口点（OEP 0x100F8559），然后把内存镜像写成
+     unpacked2.bin
+
+  4) 复制到本目录
+         copy unpacked2.bin ..\..\03_内存镜像\unpacked_image.bin
+
+     生成后应能通过：
+         cd "04_分析脚本/补丁工具"
+         python3 单元测试_MIDI补丁.py
+         python3 单元测试_Tune崩溃.py
+
+【镜像基本信息】
+
+  ImageBase    0x10000000
+  SizeOfImage  0x2B0000   (2,818,048 字节)
+  EntryPoint   0x100F8559 (OEP)
+  文件布局      与 RVA 一一对应，即文件偏移 = RVA
+
+  详见 内存布局.txt
+
+================================================================

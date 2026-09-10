@@ -1,0 +1,283 @@
+================================================================
+  修复报告：鼓垫 Tune 旋钮崩溃
+  Fix report: pad Tune knob crash
+  整理 & 修补：TOLOC
+  技术分析 & 二进制修补：DeepSeek
+================================================================
+
+【中文】
+
+----------------------------------------------------------------
+一、现象
+----------------------------------------------------------------
+调整鼓垫上的 Tune 旋钮会导致插件崩溃：
+
+  the plugin is disabled because of an error during processing
+
+没有 Windows 错误对话框，事件查看器里也没有对应记录（崩溃被宿主
+或插件的 SEH 吞掉了），所以拿不到崩溃偏移量。
+特点是：Tune 的值确实会变（写入成功），崩溃时机不固定。
+
+----------------------------------------------------------------
+二、定位过程
+----------------------------------------------------------------
+拿不到崩溃偏移量，所以改用静态分析。
+
+1) 找到真正的 setParameter
+
+   VST 的 AEffect 结构里 [obj+0x2c] 是 setParameter，它是个跳转壳：
+
+     0x10021BF0  mov ecx, [eax+0x40]     ; 取内部对象
+     0x10021C05  mov eax, [ecx]          ; 取虚表
+     0x10021C0E  mov edx, [eax+4]        ; 虚表槽 +4
+     0x10021C11  call edx
+
+   虚表 0x10103AC0 槽 +4 = 0x10014820，这才是真正的 setParameter。
+
+2) 参数索引映射（0x10017840）
+
+   索引 0        -> 组 0x80   全局 Volume
+   索引 1        -> 组 0x81   全局 M. Tune
+   索引 >= 2     -> 每 8 个一组对应一个鼓垫，
+                    组内 8 个槽位的组号取自表 0x10103AA0：
+
+                    槽 0 -> 组 0x80
+                    槽 1 -> 组 0x81
+                    槽 2 -> 组 0x91   ★ Tune
+                    槽 3 -> 组 0x152
+                    槽 4 -> 组 0x11A
+                    槽 5 -> 组 0x11B
+                    槽 6 -> 组 0x124
+                    槽 7 -> 组 0x11C
+
+   即 VST 参数索引满足 index % 8 == 4 的，就是鼓垫 Tune。
+
+3) 鼓垫 Tune 的专属路径
+
+   setParameter 里组号 >= 0x80 走鼓垫分支：
+
+     0x148E1  mov eax, [ebp-0x5C]       ; 鼓垫索引
+     0x148E8  call 0x10016120           ; 取鼓垫对象
+     0x148F1  je   0x100149C6           ; 有 NULL 检查
+     0x14908  add ebx, -0x80            ; 得到参数类型码
+     0x1490E  cmp ebx, 0x11             ; ★ 类型码 0x11 = Tune
+     0x14911  je   0x10014A80           ; 走专属分支
+
+   0x10014A80 按数值大小算出三个分量，然后回到主循环，
+   在 0x10014A20 处对每个 zone 写入三个参数：
+
+     0x14A33  call 0x100D4570   ; 参数 15 = Octave
+     0x14A4B  call 0x100D4570   ; 参数 16 = Tune Coarse
+     0x14A63  call 0x100D4570   ; 参数 17 = Tune Fine
+
+   —— 一个 Tune 旋钮同时改三项，这就是为什么它和其他旋钮不同。
+
+4) 崩溃点
+
+   写完之后：
+
+     0x14A68  mov eax, [ebp-0x34]       ; this
+     0x14A6B  mov ecx, [eax+0x1DC]      ; ★ 采样管理器，未做 NULL 检查
+     0x14A71  push ebx
+     0x14A72  call 0x100F4020           ; 更新音高
+
+   而 0x100F4020 的第一条有效指令就是：
+
+     0xF4026  mov edx, [ecx+0x2AC]      ; ★ ecx 为 0 时读取地址 0x2AC
+
+   所以 [this+0x1DC] 为空时，必崩在 0x0F4026，错误信息会是
+  「Read of address 000002AC」。
+
+----------------------------------------------------------------
+三、决定性证据：作者自己在另一条路径上做了检查
+----------------------------------------------------------------
+全局 M. Tune（索引 1）走的是另一条分支：
+
+  0x1488B  mov eax, [ebp-0x34]
+  0x1488E  mov edx, [eax+0x1DC]
+  0x14894  test edx, edx
+  0x14896  je   0x100149C6            ; ★ 有检查！
+
+对照：
+  · VST 的 setParameter 分发（0x14917）有 NULL 检查
+  · 全局 M. Tune 的 [this+0x1DC] 有 NULL 检查
+  · **只有鼓垫 Tune 这条路径漏了 [this+0x1DC] 的检查**
+
+这是原作者的一致疏漏，不是外部环境问题。
+
+----------------------------------------------------------------
+四、修复
+----------------------------------------------------------------
+在 0x10014A68 处插入空值保护，空间刚好够（原 24 字节，新 24 字节，
+无需代码洞穴）。
+
+原代码（24 字节）：
+  8b45cc8b88dc01000053e8a9f50d00e938ffffff8d742600
+
+新代码（24 字节）：
+  8b45cc8b88dc010000e30653e8a7f50d00e936ffffff9090
+
+反汇编：
+  0x10014A68  mov    eax, [ebp-0x34]
+  0x10014A6B  mov    ecx, [eax+0x1DC]
+  0x10014A71  jecxz  0x10014A79        ; ★ 为空则跳过
+  0x10014A73  push   ebx
+  0x10014A74  call   0x100F4020
+  0x10014A79  jmp    0x100149B4
+  0x10014A7E  nop / nop
+
+用 jecxz（2 字节）而不是 test+jz（4 字节），正好塞进原有空间。
+语义：采样管理器不存在时，本来就没有采样需要重新定音高，
+跳过这个通知是安全的，且与全局 M. Tune 的行为一致。
+
+----------------------------------------------------------------
+五、验证（Unicorn 模拟器，从 0x10014A68 开始执行）
+----------------------------------------------------------------
+  ① 原版，[this+0x1DC] = NULL   -> ★ 崩溃于 RVA 0x0F4026
+  ② 原版，[this+0x1DC] 有效     -> 正常返回
+  ③ 补丁，[this+0x1DC] = NULL   -> 正常返回（安全跳过）  ✅
+  ④ 补丁，[this+0x1DC] 有效     -> 正常返回（未误伤）    ✅
+
+① 的崩溃地址与静态分析完全吻合，证明定位正确。
+
+----------------------------------------------------------------
+六、补充：为什么"随机"
+----------------------------------------------------------------
+[this+0x1DC] 是采样管理器，它的创建时机取决于是否已经加载过
+采样/音色库。为空时，第一次调 Tune 就会崩；一旦它被创建，就
+不会崩。所以表现上像是"有时崩有时不崩"。
+
+本次补丁让两种情况都安全。
+
+----------------------------------------------------------------
+七、遗留
+----------------------------------------------------------------
+0x100F4020 内部还依赖 [ecx+0x2AC] 链（0xF4026 起），该链内部
+有检查（0xF402C test edx,edx / je），所以只要 ecx 本身有效就安全。
+本次已在调用点保证 ecx 有效，无需改动函数内部。
+
+================================================================
+【English】
+
+  Compiled & patched by: TOLOC
+  Analysis & binary patching: DeepSeek
+
+  NOTE: If there is any discrepancy between the Chinese and English
+  versions, the Chinese version shall prevail.
+
+----------------------------------------------------------------
+1. Symptom
+----------------------------------------------------------------
+Turning the Tune knob on a pad crashes the plugin:
+
+  the plugin is disabled because of an error during processing
+
+There is no Windows error dialog and nothing in Event Viewer (the fault
+is swallowed by the host or the plugin's own SEH), so no crash offset is
+available. The Tune value does change (the write succeeds), and the
+crash timing is irregular.
+
+----------------------------------------------------------------
+2. How it was located
+----------------------------------------------------------------
+Without a crash offset, static analysis was used.
+
+a) The real setParameter
+
+   AEffect.setParameter is a trampoline at 0x10021BF0 which loads the
+   internal object from [obj+0x40] and calls vtable slot +4.
+   That slot is 0x10014820 -- the real implementation.
+
+b) Parameter index mapping (0x10017840)
+
+   index 0    -> group 0x80   global Volume
+   index 1    -> group 0x81   global M. Tune
+   index >= 2 -> eight parameters per pad, group numbers taken from
+                 table 0x10103AA0:
+                   slot 0 -> 0x80
+                   slot 1 -> 0x81
+                   slot 2 -> 0x91   * Tune
+                   slot 3 -> 0x152
+                   slot 4 -> 0x11A
+                   slot 5 -> 0x11B
+                   slot 6 -> 0x124
+                   slot 7 -> 0x11C
+
+   So VST parameter indices where index % 8 == 4 are the pad Tune.
+
+c) The Tune-specific path
+
+     0x1490E  cmp ebx, 0x11       ; type code 0x11 = Tune
+     0x14911  je  0x10014A80      ; dedicated branch
+
+   0x10014A80 computes three components, returns to the main loop and
+   at 0x10014A20 writes three zone parameters:
+
+     0x14A33  param 15 = Octave
+     0x14A4B  param 16 = Tune Coarse
+     0x14A63  param 17 = Tune Fine
+
+   That is why one Tune knob behaves differently from other knobs.
+
+d) The crash
+
+     0x14A68  mov eax, [ebp-0x34]    ; this
+     0x14A6B  mov ecx, [eax+0x1DC]   ; sample manager, NO null check
+     0x14A72  call 0x100F4020
+
+   and 0x100F4020 begins with:
+
+     0xF4026  mov edx, [ecx+0x2AC]   ; reads address 0x2AC when ecx == 0
+
+   So a null [this+0x1DC] always faults at RVA 0x0F4026 with
+   "Read of address 000002AC".
+
+----------------------------------------------------------------
+3. Decisive evidence: the author checked it elsewhere
+----------------------------------------------------------------
+The global M. Tune path (index 1) does contain the check:
+
+  0x1488E  mov edx, [eax+0x1DC]
+  0x14894  test edx, edx
+  0x14896  je   0x100149C6          ; checked!
+
+Three places handle this object; only the pad Tune path forgot the check.
+
+----------------------------------------------------------------
+4. Fix
+----------------------------------------------------------------
+Insert a null guard at 0x10014A68. The original block is 24 bytes and
+the new one is also 24 bytes -- no code cave needed.
+
+  original: 8b45cc8b88dc01000053e8a9f50d00e938ffffff8d742600
+  patched : 8b45cc8b88dc010000e30653e8a7f50d00e936ffffff9090
+
+  0x10014A68  mov   eax, [ebp-0x34]
+  0x10014A6B  mov   ecx, [eax+0x1DC]
+  0x10014A71  jecxz 0x10014A79       ; skip when null
+  0x10014A73  push  ebx
+  0x10014A74  call  0x100F4020
+  0x10014A79  jmp   0x100149B4
+
+jecxz (2 bytes) instead of test+jz (4 bytes) so it fits exactly.
+When the sample manager does not exist there is nothing to re-pitch,
+so skipping the notification is safe and matches the global path.
+
+----------------------------------------------------------------
+5. Verification (Unicorn, executing from 0x10014A68)
+----------------------------------------------------------------
+  1) original, [this+0x1DC] = NULL  -> crash at RVA 0x0F4026
+  2) original, [this+0x1DC] valid   -> returns normally
+  3) patched,  [this+0x1DC] = NULL  -> returns normally (skipped)
+  4) patched,  [this+0x1DC] valid   -> returns normally (no regression)
+
+The crash address in (1) matches the static analysis exactly.
+
+----------------------------------------------------------------
+6. Why it looked random
+----------------------------------------------------------------
+[this+0x1DC] is the sample manager; when it is created depends on
+whether samples or a bank have been loaded. While it does not exist,
+every Tune adjustment faults. Both cases are now safe.
+
+================================================================

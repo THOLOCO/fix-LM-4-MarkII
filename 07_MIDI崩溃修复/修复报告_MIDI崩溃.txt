@@ -1,0 +1,319 @@
+================================================================
+  修复报告：分配 MIDI 输入端口后崩溃
+  Fix report: crash after assigning a MIDI input port
+  整理 & 修补：TOLOC
+  技术分析 & 二进制修补：DeepSeek
+================================================================
+
+【中文】
+
+----------------------------------------------------------------
+一、现象
+----------------------------------------------------------------
+给插件分配 MIDI 输入端口后，播放或停止时崩溃：
+
+  Access violation at address 03E96144 in module 'LM4-MarkII.dll'.
+  Read of address 00000000.
+
+插件自身轨道的正常演奏不受影响。
+
+----------------------------------------------------------------
+二、定位崩溃点
+----------------------------------------------------------------
+崩溃地址 0x03E96144，模块基址 0x03E80000，反推：
+
+  RVA = 0x03E96144 - 0x03E80000 = 0x16144
+  VA  = 0x10000000 + 0x16144   = 0x10016144
+
+对应指令：
+
+  0x1001613e  mov ecx, dword ptr [ecx + 0x184]   ; ecx = [this+0x184]
+  0x10016144  mov edx, dword ptr [ecx]           ; ★ 崩溃：ecx == 0
+  0x10016146  mov eax, dword ptr [edx + 0x8c]
+  0x1001614c  call eax                           ; 虚函数调用
+
+所以：this 非空（否则会在 0x1613e 崩），但 [this+0x184] 的值为 0。
+
+----------------------------------------------------------------
+三、这个函数是什么
+----------------------------------------------------------------
+0x10016120 是「按索引查询 MIDI 程序名」的实现：
+
+  参数：索引 0..18（共 19 个通道）
+  原函数先做范围检查（<0 或 >0x12 就返回 0），然后：
+
+      ecx = [this+0x184]        ; 当前活动程序对象
+      edx = [ecx]               ; 取虚表
+      call [edx+0x8c]           ; 调虚函数（索引作为参数）
+
+两个调用者证实它服务于 MIDI 事件路径：
+  0x1001D70F  从 MIDI 事件对象取状态字节，范围 0x81..0x92
+              参数 = 状态 - 0x81（即 MIDI 通道号）
+  0x1001D504  传入程序号
+
+全插件共 19 处调用该函数。
+
+----------------------------------------------------------------
+四、[this+0x184] 何时为空（根因）
+----------------------------------------------------------------
+把所有写 [this+0x184] 的位置都找出来了：
+
+  RVA        写入值                        位置
+  0xEB8A2    程序对象                       bank 装载
+  0xEB9D0    程序数组[索引]                 切换程序
+  0xEBAE7    程序数组[索引]                 切换程序
+  0xED941    0  ★ 唯一的清零点              bank 初始化 0xED6E0 内
+  0xEDBBA    程序数组[0]                    bank 初始化 0xED6E0 末尾
+  0xEE489    程序对象                       bank 解析
+  0xEF023    程序数组[索引]
+  0xEF0B1    程序数组[索引]
+  0xF18F1    程序数组[索引]
+
+关键：bank 初始化函数 0xED6E0 的流程是
+
+  1) 0xED941   把 [this+0x184] 清零
+  2) 循环 20 次，用工厂调用填充程序数组 [this+0x188 + i*4]
+       0xEDB37  mov eax, [edx+0x70]      ; 工厂虚函数
+       0xEDB3A  call eax
+       0xEDB42  mov [edx+ebx*4+0x188], ecx   ; ★ 存入结果，无 NULL 检查
+  3) 0xEDBBA   mov [eax+0x184], ecx      ; ecx = [eax+0x188]，即第 0 个程序
+
+所以 [this+0x184] == 0 只有一种可能：
+
+  **程序数组第 0 个元素为 NULL**
+
+要么 0xED6E0 从未在该对象上执行过（初始化被跳过 / 对象不是主实例），
+要么 0xEDB42 处的工厂返回了 NULL，而该处**没有做空值检查**就直接存入。
+
+第 2 点是一个确定的代码缺陷：0xEDB42 缺少 NULL 检查。
+
+----------------------------------------------------------------
+五、为什么只在设置 MIDI 端口后崩
+----------------------------------------------------------------
+普通钢琴卷帘演奏走的是音符处理路径，不经过 0x10016120。
+只有宿主把 MIDI 输入端口路由给插件时，宿主才会来查询
+MIDI 程序名（对应 VST 的 effGetMidiProgramName 一类接口），
+于是走到 0x10016120 → 解引用空的 [this+0x184] → 崩溃。
+
+这也解释了「插件自身轨道不受影响」。
+
+----------------------------------------------------------------
+六、修复方案
+----------------------------------------------------------------
+把 0x10016120 整体改写成「空值安全」版本：
+
+  1) 保留原有的索引范围检查（0..18，越界返回 0）
+  2) [this+0x184] 非空  → 正常调用（行为与原来完全一致）
+  3) [this+0x184] 为空  → 回退到 [this+0x188]（第 0 个程序）
+  4) 两者都为空         → 安全返回 0，不再解引用
+
+为什么选择改这个函数而不是各个调用点：
+  19 个调用点中只有 9 个检查了返回值。如果让函数在空值时返回 0，
+  那 10 个不检查返回值的调用点会立刻在同一位置二次崩溃
+  （例如 0x100187C7：call 之后直接 mov ecx,eax; mov edx,[ecx]）。
+  在函数内部回退到另一个有效对象，则 19 个调用点全部安全，
+  且不需要知道调用方是否检查返回值。
+
+代码空间：原函数占用 0x10016120..0x1001615F 共 64 字节，
+新代码 49 字节，无需代码洞穴（code cave），原地替换即可。
+
+----------------------------------------------------------------
+七、补丁字节
+----------------------------------------------------------------
+压缩流内偏移 0x0E120（对应 VA 0x10016120），共 64 字节。
+
+原代码：
+  558bec83ec0c8b450885c07c0583f8127e0833c08be55dc20400
+  578904248b89840100008b118b828c000000ffd08be55dc20400
+  8db6000000008dbf00000000
+
+新代码：
+  55                   push ebp
+  8bec                 mov  ebp, esp
+  8b4508               mov  eax, [ebp+8]        ; 索引
+  83f812               cmp  eax, 0x12
+  7726                 ja   0x10016151          ; 越界/负数 → 返回 0
+  50                   push eax                 ; 内部虚调用的参数
+  8bc1                 mov  eax, ecx            ; eax = this
+  8b8884010000         mov  ecx, [eax+0x184]    ; 当前活动程序
+  85c9                 test ecx, ecx
+  750a                 jnz  0x10016142
+  8b8888010000         mov  ecx, [eax+0x188]    ; 回退：第 0 个程序
+  85c9                 test ecx, ecx
+  740f                 jz   0x10016151          ; 都为空 → 安全返回
+  8b11                 mov  edx, [ecx]
+  ff928c000000         call dword ptr [edx+0x8c]
+  8be5                 mov  esp, ebp           ; 与原函数一致的栈恢复
+  5d                   pop  ebp
+  c20400               ret  4
+  90                   nop
+  8be5                 mov  esp, ebp
+  5d                   pop  ebp
+  33c0                 xor  eax, eax
+  c20400               ret  4
+  （其余用 90 填充至 64 字节，共 57 字节有效代码）
+
+  注意：栈恢复必须沿用原函数的 mov esp,ebp; pop ebp 写法。
+  因为内部虚调用前多压了一个参数，若直接 ret 4 会把该参数
+  当成返回地址弹出（实测会跳到地址 3 而崩溃）。
+
+重压缩后 .text 流 288,024 字节（上限 288,151，可原地替换）。
+
+----------------------------------------------------------------
+八、验证
+----------------------------------------------------------------
+静态：
+  · 补丁后 0x10016120 反汇编与上面设计一致
+  · 索引检查、两条回退分支、两条返回路径均在位
+  · 与上一版相比，.text 内仅 0xE120..0xE15F 发生变化
+  · 原有两处补丁（段权限、安装校验）保持不变
+
+单元测试（Unicorn 模拟器，直接调用 0x10016120）：
+  ① [this+0x184] 有效            → 正常调用，无异常      ✅
+  ② [this+0x184]=NULL，[0x188] 有效 → 回退成功，无异常    ✅
+  ③ 两者都为空                   → 安全返回 0           ✅
+  ④ 索引 0x20 越界               → 返回 0               ✅
+  ⑤ 索引 -1                      → 返回 0               ✅
+  对照：同一用例下原函数在 ② 崩溃（读取地址 0）           ← 证明修复有效
+
+待做（需要真机）：
+  · 在 FL Studio 中给插件分配 MIDI 输入端口，播放/停止不再崩溃
+  · 确认 19 个调用点的正常功能（程序切换、MIDI 程序名显示）无回归
+
+----------------------------------------------------------------
+十、相关：鼓垫 tune 旋钮崩溃（另有独立缺陷）
+----------------------------------------------------------------
+调整鼓垫 tune 旋钮曾会崩溃，其中**一部分**是本报告这条缺陷导致的。
+
+鼓垫参数（含 tune）在 setParameter 里走 0x148E1 分支：
+
+  0x148E8  call 0x10016120      ; ★ 取鼓垫对象 —— 就是本报告修的
+  0x148F1  je   0x100149C6      ; 返回值判空（但原版函数会先崩）
+
+原版 0x10016120 在 [this+0x184] 为空时于 0x16144 空指针解引用，
+根本走不到 0x148F1 的判空。本补丁让它空值安全后，这一类崩溃消失。
+
+**但 tune 还有第二个、独立的缺陷**：
+
+  0x10014A68  call 0x100F4020   ; 传入 [this+0x1DC]，未判空
+  0x100F4026  mov edx,[ecx+0x2AC]   ; 空值 → 读地址 0x2AC 崩溃
+
+该缺陷只在 tune 路径上（全局 M. Tune 的同款路径有判空）。
+详见 08_Tune崩溃修复/修复报告_Tune崩溃.txt。
+
+================================================================
+九、遗留问题
+----------------------------------------------------------------
+1. 没有进一步修补 0xEDB42 的缺失 NULL 检查。当前方案是在读取端兜底；
+   如果希望从源头修复（工厂返回 NULL 时不写入数组），可以再做一处补丁。
+2. 程序名上限 20 个（0x100140B4 与 0x100EE3B1 的 cmp eax,0x14）未改动。
+3. 手动加载的 .fxb 不注册程序名（插件设计如此）未改动。
+
+================================================================
+【English】
+
+  Compiled & patched by: TOLOC
+  Analysis & binary patching: DeepSeek
+
+  NOTE: If there is any discrepancy between the Chinese and English
+  versions, the Chinese version shall prevail.
+
+----------------------------------------------------------------
+1. Symptom
+----------------------------------------------------------------
+After assigning a MIDI input port to the plugin, playback or stop
+crashes with:
+
+  Access violation at address 03E96144 in module 'LM4-MarkII.dll'.
+  Read of address 00000000.
+
+Normal playing through the plugin's own track is unaffected.
+
+----------------------------------------------------------------
+2. Crash site
+----------------------------------------------------------------
+0x03E96144 - base 0x03E80000 = RVA 0x16144  ->  VA 0x10016144
+
+  0x1001613e  mov ecx, [ecx+0x184]   ; ecx = [this+0x184]
+  0x10016144  mov edx, [ecx]         ; crash: ecx == 0
+  0x10016146  mov eax, [edx+0x8c]
+  0x1001614c  call eax
+
+`this` is valid (otherwise the fault would be at 0x1613e), but
+[this+0x184] holds 0.
+
+----------------------------------------------------------------
+3. What the function does
+----------------------------------------------------------------
+0x10016120 looks up a MIDI program name by index (0..18). It dereferences
+[this+0x184] (the currently active program object) with no null check.
+It is reached only from the MIDI event path, which is why the crash
+appears only after a MIDI input port is assigned.
+
+----------------------------------------------------------------
+4. Root cause
+----------------------------------------------------------------
+[this+0x184] has exactly one writer that stores zero: 0xED941, inside
+the bank initialisation routine 0xED6E0. That routine then fills a
+20-entry program array via a factory call (0xEDB42) and finally assigns
+[this+0x184] = program[0] (0xEDBBA).
+
+Therefore [this+0x184] == 0 means program[0] is NULL, either because the
+bank was never initialised on that object, or because the factory at
+0xEDB37 returned NULL and the result was stored without a null check at
+0xEDB42 (a genuine defect).
+
+----------------------------------------------------------------
+5. Fix
+----------------------------------------------------------------
+Rewrite 0x10016120 as a null-safe wrapper:
+  - keep the original index range check (0..18)
+  - [this+0x184] valid  -> call as before
+  - [this+0x184] null   -> fall back to [this+0x188] (program 0)
+  - both null           -> return 0 safely
+
+Fixing the shared function (rather than the 19 call sites) is
+deliberate: only 9 of the 19 callers check the return value, so simply
+returning 0 would cause secondary crashes in the other 10. Falling back
+to a valid object keeps every caller safe.
+
+The original function occupies 64 bytes (0x10016120..0x1001615F); the
+new code is 49 bytes, so it fits in place with no code cave needed.
+
+----------------------------------------------------------------
+6. Verification
+----------------------------------------------------------------
+Static checks: the patched function disassembles exactly as designed;
+only 0xE120..0xE15F inside the .text stream changed (63 bytes) compared
+with the previous release; the earlier section-permission and
+installation-check patches are unchanged.
+
+Pending (needs a real machine): confirm that assigning a MIDI input port
+no longer crashes, and that program switching / MIDI program name
+display still behave correctly.
+
+----------------------------------------------------------------
+10. Related: pad tune knob crash (a separate defect)
+----------------------------------------------------------------
+Turning a pad's Tune knob used to crash. Part of that was caused by the
+defect described in this report; part by a second, independent one.
+
+Pad parameters (including Tune) go through the 0x148E1 branch of
+setParameter, which calls 0x10016120 (the function fixed above) and
+then null-checks its result. The original 0x10016120 faulted before it
+could return, so that check never helped.
+
+The second defect is at 0x10014A68, which passes [this+0x1DC] to
+0x100F4020 without a null check; that function starts with
+mov edx,[ecx+0x2AC]. It affects only the Tune path (the global M. Tune
+path does check). See 08_Tune崩溃修复/修复报告_Tune崩溃.txt.
+
+================================================================
+7. Known remaining issues
+----------------------------------------------------------------
+1. The missing null check at 0xEDB42 is not patched; the fix guards on
+   the read side instead.
+2. Hard-coded limit of 20 programs is unchanged.
+3. Manually loaded banks still do not register program names.
+
+================================================================

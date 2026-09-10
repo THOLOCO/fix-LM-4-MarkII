@@ -1,0 +1,18 @@
+---- trace ----
+  SET     0x10008000 size=0xf9000 -> 0x4(READWRITE)
+SEC .text     desc.flags=0x60000020 sec.chars=0xc0000080  -> code -> EXECUTE_READ
+  SET     0x10101000 size=0x2000 -> 0x4(READWRITE)
+SEC .rdata    desc.flags=0x40000040 sec.chars=0x40000080  -> EQUAL (keep old prot)
+  SET     0x10103000 size=0x7000 -> 0x4(READWRITE)
+SEC .data     desc.flags=0xc0000040 sec.chars=0xc0000080  -> EQUAL (keep old prot)
+  SET     0x10186000 size=0x1c000 -> 0x4(READWRITE)
+SEC .data1    desc.flags=0xc0000040 sec.chars=0xc0000080  -> EQUAL (keep old prot)
+  SET     0x101a2000 size=0x1000 -> 0x4(READWRITE)
+SEC _DATA     desc.flags=0xc0000040 sec.chars=0xc0000040  -> EQUAL (keep old prot)
+  SET     0x101a4000 size=0xf62c2 -> 0x4(READWRITE)
+SEC .rsrc     desc.flags=0x40000040 sec.chars=0x40000040  -> EQUAL (keep old prot)
+  SET     0x1029b000 size=0xd000 -> 0x4(READWRITE)
+SEC Oreloc    desc.flags=0x42000040 sec.chars=0x42000080  -> EQUAL (keep old prot)
+  SET     0x10101000 size=0x2d8 -> 0x4(READWRITE)
+  SET     0x10101000 size=0x2d8 -> 0x4(READWRITE)
+OEP -> 0x100f8559

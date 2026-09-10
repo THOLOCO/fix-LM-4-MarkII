@@ -1,0 +1,118 @@
+================================================================
+  内存布局  Memory Layout
+  LM-4 MarkII（解壳后）
+================================================================
+
+【镜像基本信息】
+
+  ImageBase      0x10000000
+  SizeOfImage    0x2B0000
+  EntryPoint     0x100F8559  (OEP，壳跳转目标)
+  文件大小       0x2B0000 = 2,818,048 字节（内存镜像）
+  原始 DLL 大小  579,032 字节（加壳后）
+
+【段布局】
+
+  名称       VA          VS          权限（解壳后）
+  .text     0x10008000  0x000F9000  0x40 EXECUTE_READWRITE ★
+  .rdata    0x10101000  0x00002000  0x04 READWRITE
+  .data     0x10103000  0x00082384  0x04 READWRITE
+  .data1    0x10186000  0x0001C000  0x04 READWRITE
+  _DATA     0x101A2000  0x00001000  0x04 READWRITE
+  .rsrc     0x101A3000  0x000F72C8  0x04 READWRITE
+  Oreloc    0x1029B000  0x0000D000  0x04 READWRITE
+  .neolit   0x102A8000  0x000061FA  （壳代码，已被覆盖）
+  .reloc    0x102AF000  0x000000DC  0x04 READWRITE
+
+  ★ 原版是 0x04 (PAGE_READWRITE)，这是崩溃根因；
+    修补后壳传入 0x40 (PAGE_EXECUTE_READWRITE)。
+
+【关键地址表】
+
+  地址          名称 / 用途
+  ------------------------------------------------------------
+  0x102A81FA    壳入口（DllMain）
+  0x102A82A5    入口调度
+  0x102A82D9    加密字符串起始（XOR 0xFF）
+  0x102A8625    主加载器
+  0x102A89A2    段权限循环开始
+  0x102A8A15    ★ push 4 —— 硬编码的 PAGE_READWRITE
+  0x102A8A43    段特性比较（决定是否设 EXECUTE_READ）
+  0x102A8A70    正确的 push 0x20 分支（被跳过）
+  0x102A8DE8    释放映射/关闭句柄
+  0x102A8DEE    计算 ImageBase + OEP
+  0x102A8E04    重定位应用
+  0x102A8ECD    字符串解密（XOR 0xFF）
+  0x102A8FD2    解压器入口
+  0x102A907E    LZ77 解压核心
+  0x102A9B0A    第二级解压器目标
+  0x102AC1FA    解压器数据表
+  ------------------------------------------------------------
+  0x1001B8E0    main() —— VST 插件入口（导出 "main"）
+  0x1001B95E    ★ 调用安装校验
+  0x1001B968    ★ jne -> 修补为 jmp
+  0x1001E5F0    校验对象构造函数
+  0x1001E6C0    安装校验主函数
+  0x1001EC90    卷序列号 / 注册表读取
+  0x1001EF10    密钥派生（CRC 表生成）
+  0x1001F020    注册表读取封装
+  0x10013A60    AEffect 构造
+  0x10013EF0    启动加载默认音色库（注册程序名）
+  0x100140A0    effGetProgramNameIndexed（20 个上限）
+  0x10016120    ★ MIDI 程序名查询
+  0x1001613E    mov ecx, [ecx+0x184]
+  0x10016144    ★ 崩溃点 mov edx, [ecx]（ecx == NULL）
+  0x10021180    VST dispatcher（opcode 0..0x18）
+  0x10021D90    VST dispatcher（opcode 0x19..0x44）
+  0x100EC750    load bank
+  0x100EE140    parse bank 核心
+  0x100F8559    OEP
+  ------------------------------------------------------------
+
+【压缩流位置（加壳文件中）】
+
+  文件偏移    解压目标 VA    解压大小    内容
+  0x0007E0B   0x10008000    0x0F9000    .text
+  0x004E3A2   0x10101000    0x002000    .rdata
+  0x004EFAE   0x10103000    0x007000    .data
+  0x0050757   0x10186000    0x01C000    .data1
+  0x00539BA   0x101A2000    0x001000    _DATA
+  0x005448A   0x101A4000    0x0F62C2    .rsrc
+  0x008BAB5   0x1029B000    0x00D000    Oreloc
+  0x008BAFF   0x102AC1FA    0x005577    解压器数据
+  0x00060C4   0x102A9B0A    0x0026F0    第二级解压器
+  0x00079FF   0x102AC1FA    0x001800    （同上）
+
+  .text 流长度限制 0x46597 (288,151 字节)
+  修改后重压缩需 ≤ 此值：zlib level=9, memLevel=7, 默认策略
+  -> 287,998 字节（可原地替换）
+
+【VST 接口】
+
+  导出函数    main @ 0x1001B8E0（序号 1）
+  插件 ID     "LM42"
+  AEffect     0x680 字节
+  dispatcher  opcode 0x00..0x44
+    opcode 3  effGetProgram
+    opcode 5  effGetProgramName
+    opcode 16 effGetNumPrograms
+    opcode 23 effGetChunk      -> vtbl+0x44
+    opcode 24 effSetChunk      -> vtbl+0x48
+    opcode 29 effGetProgramNameIndexed -> vtbl+0xe4
+    opcode 49 effGetMidiProgramName    （崩溃相关）
+    opcode 51 effGetMidiProgramCategory
+
+【AEffect 内部字段（本插件特有）】
+
+  偏移      用途
+  +0x188    程序对象数组，20 个槽位（idx 0..19）
+  +0x184    当前/活动程序对象指针（未加载时为 NULL ★）
+  +0x17C    当前 bank 对象
+  +0x1E0    文件/采样管理对象
+  +0x16C    路径字符串
+  +0x648    启动加载默认库的标志
+  +0x3F4    "采样已全部找到"标志
+  +0x3F5    "允许 Search in Directories" 标志
+  +0x67B    加载中标志
+
+================================================================

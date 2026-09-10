@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "/data/data/com.termux/files/home/lm4/emu_slots.py", line 305, in <module>
+    mu.emu_start(IMGBASE+ENTRY,0x7fff0000,count=6_000_000_000,timeout=3000*1000*1000)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/data/com.termux/files/usr/lib/python3.14/site-packages/unicorn/unicorn_py3/unicorn.py", line 769, in emu_start
+    raise self._hook_exception
+  File "/data/data/com.termux/files/usr/lib/python3.14/site-packages/unicorn/unicorn_py3/unicorn.py", line 363, in wrapper
+    return func(uc, *args, **kwargs)
+  File "/data/data/com.termux/files/usr/lib/python3.14/site-packages/unicorn/unicorn_py3/unicorn.py", line 1063, in __hook_code_cb
+    callback(uc, address, size, user_data)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/data/com.termux/files/home/lm4/emu_slots.py", line 246, in hook
+    SLOTLOG.append("%#x %s"%(r,key))
+    ^^^^^^^
+NameError: name 'SLOTLOG' is not defined

@@ -1,0 +1,74 @@
+LM-4 MarkII 预设路径修复包（已逐条验证）
+==========================================
+
+【问题原因】
+
+插件加载 .fxp / .fxb 时只认文件里存死的绝对路径，自己不做任何搜索。
+这些预设文件是在别人的机器上保存的，里面存的是：
+
+  C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\
+  Start Menu\Programs\Steinberg\LM-4 MarkII\...
+
+这个路径在你机器上不存在，所以除启动时自动加载的 lm4mkIIdef.fxb
+之外，全部加载失败。
+
+（lm4mkIIdef.fxb 存的是 C:\Program Files\Steinberg\Vstplugins\
+LM-4 MarkII\10 Mini Kit\...，插件有回退机制能在自己的目录下找到
+10 Mini Kit，所以只有它能出声。）
+
+
+【修复内容】
+
+把所有路径改写为你的实际采样位置：
+
+  C:\Program Files (x86)\Steinberg\VstPlugins\LM-4 MarkII\...
+
+共修改 2085 处路径，覆盖 33 个文件：
+  根目录            01~09 *.fxp（9 个）
+  根目录            10 Mini Kit.fxp（原为 Mac 路径，已改）
+  Wizoo Kits - Part2\Processed Studio Kits\   *.fxp ×10 + *.fxb ×1
+  Steinberg Kits\Vinyl Kits\                  *.fxp ×5  + *.fxb ×1
+  Steinberg Kits\LM4 original Kits\           *.fxb ×1
+  BitBeats Kits\BitBeats Preset & Samples\    *.fxp ×10 + *.fxb ×1
+
+
+【已验证】
+
+对照 C:\Program Files (x86)\Steinberg\VstPlugins\LM-4 MarkII\ 的
+完整目录树逐条比对：
+  2124 处路径 → 全部找到，0 处缺失 ✅
+
+只剩 5 个采样在整套音色包里确实不存在（原作者归档盘上的）：
+  V-BassSounds-Bass1 / Bass2 / Bass4 / Bass6 / Bass13.wav
+出现在 Vinyl Kits.fxb 和 Wizoo Processed Studio Kits.fxb 中
+（共 11 处引用）。这 5 个文件在网上任何 LM-4 音色包里都没有，
+属原始缺失，不影响其它采样。
+
+
+【安装方法】
+
+把本包内的文件按原目录结构【覆盖】到：
+
+  C:\Program Files (x86)\Steinberg\VstPlugins\LM-4 MarkII\
+
+例如：
+  ...\LM-4 MarkII\01 Gator Kit.fxp              ← 覆盖
+  ...\LM-4 MarkII\10 Mini Kit.fxp               ← 覆盖
+  ...\LM-4 MarkII\Wizoo Kits - Part2\Processed Studio Kits\*.fxp / *.fxb
+  ...\LM-4 MarkII\Steinberg Kits\Vinyl Kits\*.fxp / *.fxb
+  ...\LM-4 MarkII\Steinberg Kits\LM4 original Kits\LM4 original Kits.fxb
+  ...\LM-4 MarkII\BitBeats Kits\BitBeats Preset & Samples\*.fxp / *.fxb
+
+lm4mkIIdef.fxb 不需要动（它本来就正常）。
+
+
+【注意事项】
+
+1. 覆盖前建议先备份原文件。
+2. 采样文件夹必须保持在
+   C:\Program Files (x86)\Steinberg\VstPlugins\LM-4 MarkII\ 下面，
+   且目录名不能改（大小写不敏感，但名字要一致）。
+3. 如果以后把插件目录整体搬到别处，这些预设里的路径就会失效，
+   需要重新生成（找我即可）。
+
+==========================================

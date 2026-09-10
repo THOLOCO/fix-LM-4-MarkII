@@ -1,0 +1,11 @@
+---- events ----
+   VirtualProtect(addr=0x10008000 size=0xf9000 new=0x4(READWRITE))
+   VirtualProtect(addr=0x10101000 size=0x2000 new=0x4(READWRITE))
+   VirtualProtect(addr=0x10103000 size=0x7000 new=0x4(READWRITE))
+   VirtualProtect(addr=0x10186000 size=0x1c000 new=0x4(READWRITE))
+   VirtualProtect(addr=0x101a2000 size=0x1000 new=0x4(READWRITE))
+   VirtualProtect(addr=0x101a4000 size=0xf62c2 new=0x4(READWRITE))
+   VirtualProtect(addr=0x1029b000 size=0xd000 new=0x4(READWRITE))
+   VirtualProtect(addr=0x10101000 size=0x2d8 new=0x4(READWRITE))
+   VirtualProtect(addr=0x10101000 size=0x2d8 new=0x4(READWRITE))
+   OEP -> 0x100f8559
