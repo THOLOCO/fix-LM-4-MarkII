@@ -62,6 +62,22 @@ Steinberg LM-4 MarkII，2003 年的 32 位 VST2 鼓采样器。
   Set_Power Drums\                            4 个 LM4 脚本 txt + 采样
 
 ----------------------------------------------------------------
+三半、安装前的准备：导入注册表（重要）
+----------------------------------------------------------------
+插件需要两项注册表设置才能正常工作，缺失时可能在启动后被宿主
+禁用（只报 processing error，没有其它提示）。
+
+  键    HKEY_LOCAL_MACHINE\Software\Steinberg\LM4-MarkII
+  值    SetupID     字符串
+        SetupSysID  二进制
+
+最简单的方法：双击插件包里的 LM4-MarkII_注册表.reg 导入
+（需要管理员确认）。64 位 Windows 上，32 位插件读取的是
+WOW6432Node 视图，该 .reg 已同时写入两个视图。
+
+详见 10_注册表说明/注册表说明.txt
+
+----------------------------------------------------------------
 四、怎么用
 ----------------------------------------------------------------
 1) 启动时自动加载
@@ -207,6 +223,23 @@ Default location:
   Steinberg Kits\LM4 original Kits\           factory drumsets
   BitBeats Kits\BitBeats Preset & Samples\    BitBeats (10 fxp + fxb)
   Set_Power Drums\                            four LM4 scripts + samples
+
+----------------------------------------------------------------
+3b. Before installing: import the registry (important)
+----------------------------------------------------------------
+The plugin needs two registry values; when they are missing the host
+may disable the plugin shortly after start-up (reporting only a
+processing error and nothing else).
+
+  Key     HKEY_LOCAL_MACHINE\Software\Steinberg\LM4-MarkII
+  Values  SetupID     string
+          SetupSysID  binary
+
+Easiest: double-click LM4-MarkII_注册表.reg from the package
+(administrator prompt). On 64-bit Windows a 32-bit plugin reads the
+WOW6432Node view; the .reg writes both views.
+
+See 10_注册表说明/注册表说明.txt for details.
 
 ----------------------------------------------------------------
 4. How to use

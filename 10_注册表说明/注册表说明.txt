@@ -1,0 +1,182 @@
+================================================================
+  注册表说明
+  Registry notes
+================================================================
+
+【为什么需要这份文档】
+
+  实测发现：即使使用修补后的 DLL，在某些电脑上插件启动后仍会被
+  宿主禁用（提示 processing error，且没有其它报错信息）。
+  在这些电脑上导入本插件所需的注册表项后，问题消失。
+
+  因此**分发插件时，除了 DLL 和音色内容，还需要导入注册表**。
+
+----------------------------------------------------------------
+一、插件读取哪些注册表项
+----------------------------------------------------------------
+逆向分析确认（解壳后镜像）：
+
+  键：HKEY_LOCAL_MACHINE\Software\Steinberg\LM4-MarkII
+  值：
+      SetupID      REG_SZ      一个由 4 段数字组成的字符串
+      SetupSysID   REG_BINARY  10 字节，解码后是一个 10 位数字串
+
+  同时还读取 Windows 自身的 ProductId（一般不需要额外操作）：
+      HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\ProductId
+      HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\ProductId
+
+  读取代码位置（供参考）：
+      注册表读取封装    RVA 0x1F020
+      读 SetupID        RVA 0x1EB70（在 0x1EBAC 调用封装）
+      读 SetupSysID     RVA 0x1F0B0（在 0x1E83D 调用封装）
+
+----------------------------------------------------------------
+二、SetupSysID 的编码方式
+----------------------------------------------------------------
+SetupSysID 是 10 字节二进制，解码算法：
+
+    每个字节  b  ->  (b - 8) XOR 1  ->  得到一个字符
+
+例如（实测可用的值）：
+
+    3B 3C 3B 3A 39 3F 40 3B 3C 39
+    ↓
+    2  5  2  3  0  6  9  2  5  0
+    ↓
+    字符串 "2523069250"
+
+反向编码（从数字串生成二进制）：
+    每个字符 c  ->  (c XOR 1) + 8
+
+----------------------------------------------------------------
+三、已知可用的值（实测环境导出）
+----------------------------------------------------------------
+
+    SetupID     = 1082593784-1898402330-2418652173-2326646239
+    SetupSysID  = 3B 3C 3B 3A 39 3F 40 3B 3C 39
+
+----------------------------------------------------------------
+四、怎么导入
+----------------------------------------------------------------
+本目录下的 LM4-MarkII_注册表.reg 已包含上述内容，
+双击导入即可（需要管理员确认）。
+
+也可以手动：Win+R -> regedit -> 找到
+    HKEY_LOCAL_MACHINE\SOFTWARE\Steinberg\LM4-MarkII
+新建上述两个值。
+
+注意（64 位 Windows）：
+    插件是 32 位程序，在 64 位系统上默认读取 WOW6432Node 视图，
+    即实际路径为
+        HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII
+    本目录的 .reg 文件同时写入了两个视图，确保两种系统都能读到。
+
+----------------------------------------------------------------
+五、如何从一台正常工作的电脑导出
+----------------------------------------------------------------
+如果上面的值在你的环境里不适用，可以这样做：
+
+  regedit -> 定位到
+      HKEY_LOCAL_MACHINE\SOFTWARE\Steinberg\LM4-MarkII
+  （64 位系统上如果上面这个位置为空，请看
+      HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII）
+  右键该键 -> 导出 -> 保存为 .reg
+  把这个 .reg 一起发给别人导入即可。
+
+----------------------------------------------------------------
+六、备注
+----------------------------------------------------------------
+· 修补后的 DLL 已跳过 main() 里的授权校验分支，
+  但校验函数本身仍会被调用（它还会做初始化工作），
+  所以注册表仍然可能被读取 —— 这是"开发机上正常、
+  其它机器被禁用"这类差异的合理解释。
+· 如你的环境有其它表现，请连同 regedit 导出内容一起反馈。
+
+================================================================
+【English】
+
+----------------------------------------------------------------
+Why this document exists
+----------------------------------------------------------------
+In testing, even with the patched DLL the plugin could still be
+disabled by the host on some machines (reported as a processing
+error, with no other message). Importing the plugin's registry
+entries on those machines resolved it.
+
+So when distributing the plugin, the registry entries must be
+imported in addition to the DLL and the sample content.
+
+----------------------------------------------------------------
+1. Which registry entries are read
+----------------------------------------------------------------
+Key:  HKEY_LOCAL_MACHINE\Software\Steinberg\LM4-MarkII
+Values:
+    SetupID     REG_SZ      a string of 4 numeric groups
+    SetupSysID  REG_BINARY  10 bytes, decoding to a 10-digit number
+
+The plugin also reads Windows' own ProductId (normally no action
+needed):
+    HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\ProductId
+    HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\ProductId
+
+Code locations (for reference):
+    registry wrapper   RVA 0x1F020
+    reads SetupID      RVA 0x1EB70 (calls the wrapper at 0x1EBAC)
+    reads SetupSysID   RVA 0x1F0B0 (calls the wrapper at 0x1E83D)
+
+----------------------------------------------------------------
+2. SetupSysID encoding
+----------------------------------------------------------------
+SetupSysID is 10 binary bytes; each byte decodes as:
+
+    (b - 8) XOR 1   ->  one character
+
+Example (known-good value):
+    3B 3C 3B 3A 39 3F 40 3B 3C 39  ->  "2523069250"
+
+Reverse:
+    (c XOR 1) + 8   per character
+
+----------------------------------------------------------------
+3. Known-good values (exported from a working environment)
+----------------------------------------------------------------
+    SetupID     = 1082593784-1898402330-2418652173-2326646239
+    SetupSysID  = 3B 3C 3B 3A 39 3F 40 3B 3C 39
+
+----------------------------------------------------------------
+4. How to import
+----------------------------------------------------------------
+LM4-MarkII_注册表.reg in this folder contains the values above;
+double-click it and confirm the administrator prompt.
+
+Manually: Win+R -> regedit -> navigate to
+    HKEY_LOCAL_MACHINE\SOFTWARE\Steinberg\LM4-MarkII
+and create the two values.
+
+64-bit Windows note:
+    The plugin is 32-bit, so on 64-bit Windows it reads the
+    WOW6432Node view, i.e. the effective path is
+        HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII
+    The .reg file here writes both views so either system works.
+
+----------------------------------------------------------------
+5. Exporting from a working machine
+----------------------------------------------------------------
+If the values above do not apply to your setup:
+  regedit -> HKEY_LOCAL_MACHINE\SOFTWARE\Steinberg\LM4-MarkII
+  (on 64-bit Windows, if that is empty, look under
+      HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII )
+  Right-click -> Export -> save as .reg, and ship that file instead.
+
+----------------------------------------------------------------
+6. Note
+----------------------------------------------------------------
+The patched DLL skips the authorisation *branch* in main(), but the
+check function itself is still called (it also performs initialisation),
+so the registry can still be read -- a plausible explanation for the
+"works on the dev machine, disabled elsewhere" difference.
+
+If your environment behaves differently, please report back together
+with a regedit export.
+
+================================================================

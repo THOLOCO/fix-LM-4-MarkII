@@ -1,0 +1,217 @@
+================================================================
+  DEP 是什么？—— 通俗版说明
+  What is DEP? — plain-language explanation
+================================================================
+
+本文档面向非技术人员，用来解释「这个插件为什么以前用不了」。
+写给别人看的，可以直接照抄。
+
+This document is written for non-technical readers, to explain
+"why this plugin did not work before". Feel free to copy it.
+
+----------------------------------------------------------------
+【中文】一句话版本
+----------------------------------------------------------------
+
+> 插件把「代码区」错误地声明成了「数据区」。
+> 老 Windows 不管，新 Windows 严格管，
+> 于是插件一启动就被系统拦下。
+> 改 3 个字节把声明纠正即可。
+
+----------------------------------------------------------------
+【中文】打个比方
+----------------------------------------------------------------
+
+想象你的电脑内存是一栋楼，里面有很多房间。
+每个房间要么是「仓库」，要么是「车间」：
+
+  · 仓库 —— 只能存东西、取东西
+  · 车间 —— 可以干活（执行代码）
+
+DEP 就是「楼管」，他的工作是：
+盯死仓库，不许有人在仓库里干活。
+
+为什么？因为黑客最爱干的事，就是把坏东西偷偷塞进仓库，
+然后骗电脑「来仓库里干活吧」—— 一旦干了，电脑就被控制了。
+所以 DEP 的核心规矩就一句话：
+
+  ★ 存数据的地方，不许执行代码。
+
+----------------------------------------------------------------
+【中文】这个插件为什么撞上了
+----------------------------------------------------------------
+
+2003 年作者写这个插件时，给代码房间挂的牌子是「仓库」。
+
+在当年这完全没问题，因为那时候的「楼管」是个摆设 ——
+牌子挂「仓库」，里面照样能干活，谁也不管。
+
+但是现在的 Windows，楼管是真干活的了。于是：
+
+  1. 插件启动，楼管按牌子把代码房间标成「仓库」
+  2. 插件内部有个「解压器」，把真正的程序代码搬进这些房间
+  3. 搬完之后，程序说「好了，咱们开始干活吧」，往房间里一跳 ——
+  4. 楼管一把拦住：「这是仓库，不许干活！」
+  5. 插件当场死掉，宿主只能弹一句「插件有问题」
+
+就这一下。代码本身一个字没错，纯粹是牌子挂错了。
+
+----------------------------------------------------------------
+【中文】那 3 个字节改了什么
+----------------------------------------------------------------
+
+把牌子从「仓库」改成了「车间兼仓库」。
+
+改完之后，楼管不再拦，插件正常启动。
+
+为什么当年没事、现在崩？
+
+  2003 年：楼管基本不管 → 牌子写「仓库」也照样干活
+  现  在：楼管严格执行   → 写「仓库」就真的不许干活
+
+----------------------------------------------------------------
+【中文】为什么不直接改牌子
+----------------------------------------------------------------
+
+有人会问：既然牌子挂错了，那直接把插件文件里的牌子
+改成「车间」不就行了？
+
+不行，两个原因：
+
+  1. 那块牌子是假的 —— 文件里其实没有代码内容，
+     真正的代码是插件启动时现场解压出来的。改假牌子没意义。
+  2. 就算改了，插件自己会再挂一遍 —— 它启动时会主动跟楼管说
+     「给我标成仓库」，把我们改的覆盖掉。
+
+所以必须在它自己挂完牌子之后动手 —— 这正是修改那 3 个字节做的事。
+
+----------------------------------------------------------------
+【中文】术语对照（如果有人要查资料）
+----------------------------------------------------------------
+
+  大白话        专业说法
+  ----------    --------------------------------------------
+  楼管          DEP（数据执行保护，Data Execution Prevention）
+  牌子          内存页的保护属性
+  「仓库」      PAGE_READWRITE (0x04) —— 可读写但不可执行
+  「车间兼仓库」 PAGE_EXECUTE_READWRITE (0x40) —— 可读写且可执行
+  楼管拦人      访问冲突 / Access Violation (0xC0000005)
+
+  DEP 原理：CPU 在硬件层面可以给每块内存打标记 ——
+  「只能当数据读写，不能当代码执行」。这本来是防黑客的。
+  这个插件的毛病就是：程序代码所在的内存被标成了「不可执行」。
+  2003 年 32 位程序默认不开 DEP，标记被 CPU 忽略；
+  现代 Windows 全面强制开启，标记真的生效了。
+
+================================================================
+【English】One-line version
+================================================================
+
+> The plugin incorrectly declared its "code area" as a "data area".
+> Old Windows ignored this; modern Windows enforces it strictly,
+> so the plugin gets blocked the moment it starts.
+> Fixing the declaration takes 3 bytes.
+
+----------------------------------------------------------------
+【English】An analogy
+----------------------------------------------------------------
+
+Think of your computer's memory as a building with many rooms.
+Each room is either a STOREROOM or a WORKSHOP:
+
+  · Storeroom — you may only put things in and take things out
+  · Workshop  — you may actually do work (execute code)
+
+DEP is the "building manager" whose job is:
+watch the storerooms, and never let anyone work inside them.
+
+Why? Because the favourite trick of malware is to smuggle something
+bad into a storeroom and then trick the computer into "working" there
+— once it does, the machine is compromised. So the core rule is:
+
+  * A place that stores data must not execute code.
+
+----------------------------------------------------------------
+【English】Why this plugin ran into it
+----------------------------------------------------------------
+
+When the author wrote this plugin in 2003, the room that holds the
+program's code was labelled "storeroom".
+
+That was completely fine back then, because the "building manager"
+was little more than decoration — a room labelled "storeroom" could
+still be worked in, and nobody cared.
+
+But on modern Windows the manager really does its job. So:
+
+  1. The plugin starts, and the manager marks the code room as a
+     "storeroom" according to its label.
+  2. Inside the plugin there is an unpacker that moves the real
+     program code into those rooms.
+  3. Once done, the program says "right, let's get to work" and jumps
+     into the room —
+  4. The manager blocks it: "This is a storeroom. No working here!"
+  5. The plugin dies on the spot; the host can only report a
+     generic "plugin error".
+
+That is all it is. Not a single byte of the code is wrong — the
+label was simply wrong.
+
+----------------------------------------------------------------
+【English】What the 3 bytes changed
+----------------------------------------------------------------
+
+The label was changed from "storeroom" to "workshop + storeroom".
+
+After that the manager no longer blocks it and the plugin starts
+normally.
+
+Why did it work back then and crash now?
+
+  2003:        the manager barely enforced anything
+               -> a "storeroom" label still ran fine
+  Today:       the manager enforces it strictly
+               -> a "storeroom" label really cannot be executed
+
+----------------------------------------------------------------
+【English】Why not just fix the label in the file
+----------------------------------------------------------------
+
+Someone might ask: the label is wrong, so why not just edit the
+label stored in the plugin file?
+
+Two reasons:
+
+  1. That label is a decoy — the file does not actually contain the
+     code. The real code is unpacked into memory at start-up.
+     Changing the decoy achieves nothing.
+  2. Even if you changed it, the plugin would immediately set it
+     again itself — at start-up it explicitly asks the manager to
+     mark the area as a "storeroom", overwriting your change.
+
+So the fix has to happen after the plugin sets its own label —
+which is exactly what those 3 bytes do.
+
+----------------------------------------------------------------
+【English】Glossary
+----------------------------------------------------------------
+
+  Plain term          Technical term
+  ------------------  --------------------------------------------
+  building manager    DEP (Data Execution Prevention)
+  label               memory page protection attribute
+  "storeroom"         PAGE_READWRITE (0x04) — readable/writable,
+                      NOT executable
+  "workshop"          PAGE_EXECUTE_READWRITE (0x40) — readable,
+                      writable, executable
+  manager blocking    access violation (0xC0000005)
+
+  How DEP works: at the hardware level the CPU can tag each block of
+  memory as "data only, never code". This exists to stop malware.
+  This plugin's problem is simply that the memory holding its own
+  code was tagged "not executable".
+  In 2003, 32-bit programs had DEP off by default and the CPU ignored
+  the tag; modern Windows enforces DEP everywhere, so the tag took
+  effect and the plugin was blocked.
+
+================================================================
