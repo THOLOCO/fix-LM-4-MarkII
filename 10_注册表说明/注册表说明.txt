@@ -1,6 +1,8 @@
 ================================================================
   注册表说明
   Registry notes
+  整理 & 修补：TOLOC
+  技术分析 & 二进制修补：DeepSeek
 ================================================================
 
 【为什么需要这份文档】
@@ -18,7 +20,7 @@
 
   键：HKEY_LOCAL_MACHINE\Software\Steinberg\LM4-MarkII
   值：
-      SetupID      REG_SZ      一个由 4 段数字组成的字符串
+      SetupID      REG_SZ      由 4 段数字组成的字符串
       SetupSysID   REG_BINARY  10 字节，解码后是一个 10 位数字串
 
   同时还读取 Windows 自身的 ProductId（一般不需要额外操作）：
@@ -37,23 +39,20 @@ SetupSysID 是 10 字节二进制，解码算法：
 
     每个字节  b  ->  (b - 8) XOR 1  ->  得到一个字符
 
-例如（实测可用的值）：
-
-    3B 3C 3B 3A 39 3F 40 3B 3C 39
-    ↓
-    2  5  2  3  0  6  9  2  5  0
-    ↓
-    字符串 "2523069250"
-
 反向编码（从数字串生成二进制）：
     每个字符 c  ->  (c XOR 1) + 8
 
 ----------------------------------------------------------------
-三、已知可用的值（实测环境导出）
+三、实测可用的值（从可用机器直接导出）
 ----------------------------------------------------------------
+以下数据于 2026-09-13 从 **TOLOC-LAPTOP（192.168.3.177）**
+用 `reg export` 原样导出，该机插件工作正常：
 
-    SetupID     = 1082593784-1898402330-2418652173-2326646239
-    SetupSysID  = 3B 3C 3B 3A 39 3F 40 3B 3C 39
+    SetupID     = 0-0-0-0
+    SetupSysID  = 3D 3B 3C 3A 3F 3C 3F 3C 39 3F
+                  解码后 = "4253656506"
+
+注意这个值和早期分析时假设的不同（见第六节）。
 
 ----------------------------------------------------------------
 四、怎么导入
@@ -83,14 +82,49 @@ SetupSysID 是 10 字节二进制，解码算法：
   右键该键 -> 导出 -> 保存为 .reg
   把这个 .reg 一起发给别人导入即可。
 
+命令行方式（管理员 CMD）：
+  reg export "HKLM\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII" x.reg /y
+
 ----------------------------------------------------------------
-六、备注
+六、一个需要说明的疑点
 ----------------------------------------------------------------
-· 修补后的 DLL 已跳过 main() 里的授权校验分支，
-  但校验函数本身仍会被调用（它还会做初始化工作），
-  所以注册表仍然可能被读取 —— 这是"开发机上正常、
-  其它机器被禁用"这类差异的合理解释。
-· 如你的环境有其它表现，请连同 regedit 导出内容一起反馈。
+早期分析（从另一台机器的数据）曾得出 SetupSysID 解码后应为
+"2523069250"：
+
+    3B 3C 3B 3A 39 3F 40 3B 3C 39  ->  "2523069250"
+
+但 TOLOC-LAPTOP 上实际可用的是：
+
+    3D 3B 3C 3A 3F 3C 3F 3C 39 3F  ->  "4253656506"
+
+两者不同，而后者在实机上插件工作正常。
+
+解释：修补后的 DLL 已经跳过了 main() 里"校验失败就返回 NULL"的
+分支（0x1001B968 处 jne 改 jmp），因此**校验结果本身不再决定
+插件是否加载**。校验函数仍会被调用（它同时承担初始化工作），
+而注册表项**存在**与**完全缺失**会导致它走不同分支、产生不同的
+初始化路径 —— 这才是"某些电脑上被禁用"的真正原因。
+
+结论：**分发时应使用实测可用的值**（即本节后半段那组）。
+若你的机器用这组值仍不行，请按第五节导出你自己机器的值。
+
+----------------------------------------------------------------
+七、同机其它 Steinberg 插件（供对照）
+----------------------------------------------------------------
+同一台电脑上还装了 Virtual Guitarist 系列，注册表结构完全相同：
+
+    [HKLM\SOFTWARE\WOW6432Node\Steinberg\Virtual Guitarist]
+    SetupID     = 1239765930-1066732172-2494725182-359992275
+    SetupSysID  = 38 3E 41 38 3A 3E 38 3A 38 38   ("1781371311")
+
+    [HKLM\SOFTWARE\WOW6432Node\Steinberg\Virtual Guitarist EE]
+    SetupID     = 2885539254-1066732172-2494725182-359992275
+    SetupSysID  = 3D 38 3B 3A 40 38 3B 39 3D 3B
+    Install Path= C:\Program Files (x86)\Steinberg\Vstplugins\Virtual Guitarist Electric Edition
+
+可见 SetupID 一般是 4 段 10 位数字，而 LM-4 这台机器上写的是
+"0-0-0-0"（安装器/注册机留下的占位值）—— 这也印证了
+"值本身不重要、只要项存在"的推断。
 
 ================================================================
 【English】
@@ -131,17 +165,21 @@ SetupSysID is 10 binary bytes; each byte decodes as:
 
     (b - 8) XOR 1   ->  one character
 
-Example (known-good value):
-    3B 3C 3B 3A 39 3F 40 3B 3C 39  ->  "2523069250"
-
 Reverse:
     (c XOR 1) + 8   per character
 
 ----------------------------------------------------------------
-3. Known-good values (exported from a working environment)
+3. Verified values (exported directly from a working machine)
 ----------------------------------------------------------------
-    SetupID     = 1082593784-1898402330-2418652173-2326646239
-    SetupSysID  = 3B 3C 3B 3A 39 3F 40 3B 3C 39
+Exported on 2026-09-13 from TOLOC-LAPTOP (192.168.3.177) using
+`reg export`, where the plugin works correctly:
+
+    SetupID     = 0-0-0-0
+    SetupSysID  = 3D 3B 3C 3A 3F 3C 3F 3C 39 3F
+                  decodes to "4253656506"
+
+This differs from the value assumed during earlier analysis -- see
+section 6.
 
 ----------------------------------------------------------------
 4. How to import
@@ -162,21 +200,56 @@ and create the two values.
 ----------------------------------------------------------------
 5. Exporting from a working machine
 ----------------------------------------------------------------
-If the values above do not apply to your setup:
   regedit -> HKEY_LOCAL_MACHINE\SOFTWARE\Steinberg\LM4-MarkII
   (on 64-bit Windows, if that is empty, look under
       HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII )
-  Right-click -> Export -> save as .reg, and ship that file instead.
+  Right-click -> Export -> save as .reg.
+
+From an elevated command prompt:
+  reg export "HKLM\SOFTWARE\WOW6432Node\Steinberg\LM4-MarkII" x.reg /y
 
 ----------------------------------------------------------------
-6. Note
+6. An open point
 ----------------------------------------------------------------
-The patched DLL skips the authorisation *branch* in main(), but the
-check function itself is still called (it also performs initialisation),
-so the registry can still be read -- a plausible explanation for the
-"works on the dev machine, disabled elsewhere" difference.
+Earlier analysis (based on data from a different machine) concluded
+that SetupSysID should decode to "2523069250":
 
-If your environment behaves differently, please report back together
-with a regedit export.
+    3B 3C 3B 3A 39 3F 40 3B 3C 39  ->  "2523069250"
+
+but the value that actually works on TOLOC-LAPTOP is:
+
+    3D 3B 3C 3A 3F 3C 3F 3C 39 3F  ->  "4253656506"
+
+The two differ, and the latter works in practice.
+
+Explanation: the patched DLL already skips the "check failed ->
+return NULL" branch in main() (jne -> jmp at 0x1001B968), so the
+check result no longer decides whether the plugin loads. The check
+function is still called (it also performs initialisation), and the
+*absence* of the registry entries versus their *presence* makes it
+take different branches -- which is the real cause of the
+"disabled on some machines" behaviour.
+
+Conclusion: distribute the value that is verified to work (the one
+in section 3). If it still fails on your machine, export your own
+values as described in section 5.
+
+----------------------------------------------------------------
+7. Other Steinberg plugins on the same machine (for reference)
+----------------------------------------------------------------
+Same registry layout:
+
+    [HKLM\SOFTWARE\WOW6432Node\Steinberg\Virtual Guitarist]
+    SetupID     = 1239765930-1066732172-2494725182-359992275
+    SetupSysID  = 38 3E 41 38 3A 3E 38 3A 38 38   ("1781371311")
+
+    [HKLM\SOFTWARE\WOW6432Node\Steinberg\Virtual Guitarist EE]
+    SetupID     = 2885539254-1066732172-2494725182-359992275
+    SetupSysID  = 3D 38 3B 3A 40 38 3B 39 3D 3B
+
+Note that SetupID is normally four 10-digit groups, whereas LM-4 on
+this machine holds "0-0-0-0" (a placeholder written by the installer
+or keygen) -- further supporting the idea that the exact value
+matters less than the entry simply existing.
 
 ================================================================

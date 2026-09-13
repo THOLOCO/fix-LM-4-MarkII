@@ -142,13 +142,24 @@ main() 里的校验分支（VA 0x1001b95c）：
   4. 每个字节做 (b - 8) XOR 1
   5. 结果必须等于 "2523069250"
 
-实测验证（用安装日志里的真实值）：
-  SetupSysID (REG_BINARY) = 3B 3C 3B 3A 39 3F 40 3B 3C 39
-  解密后 = "2523069250"
-  期望值 = "2523069250"    -> 通过
+【2026-09-13 更正】实测机器上的值与此前的推算不同：
 
-但实际加载失败，说明注册表值与安装器写入的不一致
-（可能被存成 REG_SZ 文本，或值被改写）。
+  早期推算（基于另一台机器的数据）：
+    SetupSysID = 3B 3C 3B 3A 39 3F 40 3B 3C 39 -> "2523069250"
+
+  实际可用机器（TOLOC-LAPTOP，reg export 原样导出）：
+    SetupID    = "0-0-0-0"
+    SetupSysID = 3D 3B 3C 3A 3F 3C 3F 3C 39 3F -> "4253656506"
+
+  两者不同，而后者在实机上插件工作正常。
+
+  WHY：修补后的 DLL 已跳过"校验失败就返回 NULL"的分支
+  （0x1001B968 处 jne 改 jmp），校验结果本身不再决定插件是否
+  加载。校验函数仍被调用（同时承担初始化），而注册表项
+  **存在**与**完全缺失**会让它走不同分支、产生不同的初始化路径
+  —— 这才是"某些电脑上被禁用"的真正原因。
+
+  结论：分发时使用实测可用的那组值（见 10_注册表说明/）。
 
 关键：错误提示框本身弹不出来。
   代码请求字符串资源 ID 128，但插件资源表里只有
@@ -388,7 +399,24 @@ Patched:
   0x1001b968  jne  0x1001b99f    ; pass -> continue
   0x1001b984  xor  eax, eax      ; fail -> return NULL
 
-The check derives a fixed string "2523069250" from a built-in CRC table
+The check derives a fixed string from a built-in CRC table.
+
+  [2026-09-13 correction] The value actually present on a working
+  machine (TOLOC-LAPTOP, exported with `reg export`) differs from the
+  one previously inferred:
+
+    earlier inference : 3B 3C 3B 3A 39 3F 40 3B 3C 39 -> "2523069250"
+    working machine   : 3D 3B 3C 3A 3F 3C 3F 3C 39 3F -> "4253656506"
+                        SetupID = "0-0-0-0"
+
+  The patched DLL skips the "check failed -> return NULL" branch
+  (jne -> jmp at 0x1001B968), so the check result no longer decides
+  whether the plugin loads. The check function is still called (it
+  also initialises state), and the *presence* versus *absence* of the
+  registry entries makes it take different paths -- which is the real
+  reason the plugin gets disabled on some machines.
+
+  Distribute the value verified to work (see 10_注册表说明/).
 and compares it against a decoded registry value
 (HKLM\Software\Steinberg\LM4-MarkII\SetupSysID, each byte (b-8) XOR 1).
 
