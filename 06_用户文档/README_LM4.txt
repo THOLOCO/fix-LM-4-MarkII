@@ -106,6 +106,12 @@ WOW6432Node 视图，该 .reg 已同时写入两个视图。
      → 指向存放 .aif / .wav 的文件夹
    注意：这个菜单项只在插件检测到采样缺失时才出现。
 
+3b) 预设路径已经有人修好了
+   2021 年就有人做了同样的事，公开在这里：
+     https://github.com/nulla2011/fix-LM-4-MarkII
+   如果你的预设路径有问题，去那里拿现成的脚本也可以。
+   本包里的预设已经改好了，一般不需要再动。
+
 4) 导入 Power Drums 脚本
    Set_Power Drums\ 里有 4 个 txt（LM4/LM9 Script 格式）。
    在插件界面【右键】→ Import LM4/LM9 Script... → 选 txt
@@ -270,6 +276,13 @@ See 10_注册表说明/注册表说明.txt for details.
      -> choose "Search in Directories..."
      -> point it to the folder containing the .aif / .wav files
    This menu item only appears when the plugin detects missing samples.
+
+3b) The preset paths have already been fixed by someone else
+   Back in 2021 someone solved the same problem and published it:
+     https://github.com/nulla2011/fix-LM-4-MarkII
+   If your preset paths are broken, you can grab their scripts.
+   The presets in this package are already fixed, so normally
+   there is nothing to do.
 
 4) Importing the Power Drums scripts
    Set_Power Drums\ contains four txt files (LM4/LM9 script format).

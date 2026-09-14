@@ -30,6 +30,7 @@
 
 05_预设路径修复/
     预设文件路径改写与验证工具
+    README_参考方案与致谢.txt   ★ 已有的第三方方案（2021 年）
 
 06_用户文档/
     README_LM4.txt             面向使用者的中英双语说明
@@ -103,6 +104,12 @@ README_逆向分析.txt            技术报告（问题原理、修补细节、
   · 分配 MIDI 输入端口后崩溃 —— 07_MIDI崩溃修复/
   · 调整鼓垫 Tune 旋钮崩溃 —— 08_Tune崩溃修复/
 
+**预设路径已经有现成方案**
+  2021 年就有 https://github.com/nulla2011/fix-LM-4-MarkII 解决了
+  同一个问题（预设里存死的绝对路径）。本仓库的重点是 DLL 的
+  二进制修补，预设路径属附带产物。
+  对照与致谢见 05_预设路径修复/README_参考方案与致谢.txt
+
 **分发插件时不要忘记注册表**
   实测：某些电脑上即使使用修补后的 DLL，插件仍会被宿主禁用；
   导入 10_注册表说明/ 下的 .reg 后恢复正常。
@@ -137,6 +144,7 @@ Package contents
 03_内存镜像/            full unpacked memory image + layout notes
 04_分析脚本/            emulator, tracing scripts, patch tool
 05_预设路径修复/        preset path fixing tools
+                        (see README_参考方案与致谢.txt for prior art)
 06_用户文档/            end-user README (bilingual)
 
 README_逆向分析.txt     technical report
